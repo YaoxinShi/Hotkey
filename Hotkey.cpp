@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #define B_KEY (UINT)'B'
+#define Q_KEY (UINT)'Q'
 int x = 0;
 
 typedef USHORT sc_type; // Scan code.
@@ -14,11 +15,13 @@ HINSTANCE g_hInstance = NULL;
 DWORD g_MainThreadID = NULL;
 DWORD g_HookThreadID = NULL;
 HHOOK g_KeybdHook = NULL;
-static bool sHookSyncd;
+static bool sHookSyncd = false;
 static HANDLE sThreadHandle = NULL;
+static bool sQKeyPressed = false;
 
 bool alt_key_down = false;
 int b_key_state = 0;
+int q_key_state = 0;
 #define SC_LALT 0x038
 #define SC_RALT 0x138
 
@@ -40,7 +43,6 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 		bool key_up = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
 		bool key_down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
 		bool alt_key = (sc == SC_LALT || sc == SC_RALT);
-		bool b_key = (vk == B_KEY);
 		if (key_down && alt_key)
 		{
 			alt_key_down = true;
@@ -49,6 +51,8 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 		{
 			alt_key_down = false;
 		}
+
+		bool b_key = (vk == B_KEY);
 		if (key_down && b_key)
 		{
 			if (b_key_state == 0)
@@ -67,8 +71,29 @@ LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
 		if (alt_key_down && (b_key_state == 1))
 		{
 			x++;
-			wprintf(L"WM_HOTKEY received, %d\n", x);
+			wprintf(L"alt+b received, %d\n", x);
 			Beep(523, 150);
+		}
+
+		bool q_key = (vk == Q_KEY);
+		if (key_down && q_key)
+		{
+			if (q_key_state == 0)
+			{
+				q_key_state = 1;
+			}
+			else if (q_key_state == 1)
+			{
+				q_key_state = 2;
+			}
+		}
+		if (key_up && q_key)
+		{
+			q_key_state = 0;
+		}
+		if (alt_key_down && (q_key_state == 1))
+		{
+			sQKeyPressed = true;
 		}
 	}
 
@@ -116,15 +141,28 @@ void method1()
 	{
 		wprintf(L"Hotkey 'alt+b' registered, using MOD_NOREPEAT flag\n");
 	}
+	if (RegisterHotKey(NULL, 2, MOD_ALT | MOD_NOREPEAT, Q_KEY))
+	{
+		wprintf(L"Hotkey 'alt+q' registered, using MOD_NOREPEAT flag\n");
+	}
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0))
 	{
 		if (msg.message == WM_HOTKEY)
 		{
-			x++;
-			wprintf(L"WM_HOTKEY received, %d\n", x);
-			Beep(523, 150);
+			if (msg.wParam == 1)
+			{
+				x++;
+				wprintf(L"alt+b received, %d\n", x);
+				Beep(523, 150);
+			}
+			else if (msg.wParam == 2)
+			{
+				UnregisterHotKey(NULL, 1);
+				UnregisterHotKey(NULL, 2);
+				break;
+			}
 		}
 	}
 }
@@ -141,11 +179,15 @@ void method2()
 		Sleep(10);
 
 	wprintf(L"Hotkey 'alt+b' hooked, no repeat\n");
+	wprintf(L"Hotkey 'alt+q' hooked, no repeat\n");
 
-	while (true)
+	while (!sQKeyPressed)
 	{
 		Sleep(100);
 	}
+
+	for (int i = 0; i < 50 && !PostThreadMessage(g_HookThreadID, AHK_UNHOOK, 0, 0); ++i)
+		Sleep(10);
 }
 
 int main()
