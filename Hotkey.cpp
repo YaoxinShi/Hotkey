@@ -5,25 +5,153 @@
 #include <stdio.h>
 
 #define B_KEY (UINT)'B'
+int x = 0;
+
+typedef USHORT sc_type; // Scan code.
+typedef UCHAR vk_type;  // Virtual key.
+
+HINSTANCE g_hInstance = NULL;
+DWORD g_MainThreadID = NULL;
+DWORD g_HookThreadID = NULL;
+HHOOK g_KeybdHook = NULL;
+static bool sHookSyncd;
+static HANDLE sThreadHandle = NULL;
+
+bool alt_key_down = false;
+int b_key_state = 0;
+#define SC_LALT 0x038
+#define SC_RALT 0x138
+
+enum UserMessages {
+	AHK_HOOK = WM_USER,
+	AHK_UNHOOK,
+	AHK_SYNC,
+};
+
+LRESULT CALLBACK LowLevelKeybdProc(int aCode, WPARAM wParam, LPARAM lParam)
+{
+	if (aCode == HC_ACTION)
+	{
+		KBDLLHOOKSTRUCT& event = *(PKBDLLHOOKSTRUCT)lParam;  // For convenience, maintainability, and possibly performance.
+		vk_type vk = (vk_type)event.vkCode;
+		sc_type sc = (sc_type)event.scanCode;
+		//wprintf(L"~~~~~~~~~~~~, %d, %d, %d\n", wParam, vk, sc);
+
+		bool key_up = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
+		bool key_down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+		bool alt_key = (sc == SC_LALT || sc == SC_RALT);
+		bool b_key = (vk == B_KEY);
+		if (key_down && alt_key)
+		{
+			alt_key_down = true;
+		}
+		if (key_up && alt_key)
+		{
+			alt_key_down = false;
+		}
+		if (key_down && b_key)
+		{
+			if (b_key_state == 0)
+			{
+				b_key_state = 1;
+			}
+			else if (b_key_state == 1)
+			{
+				b_key_state = 2;
+			}
+		}
+		if (key_up && b_key)
+		{
+			b_key_state = 0;
+		}
+		if (alt_key_down && (b_key_state == 1))
+		{
+			x++;
+			wprintf(L"WM_HOTKEY received, %d\n", x);
+			Beep(523, 150);
+		}
+	}
+
+	return CallNextHookEx(0, aCode, wParam, lParam);;
+}
+
+DWORD WINAPI HookThreadProc(LPVOID aUnused)
+{
+	MSG msg;
+	bool problem_activating_hooks;
+
+	for (;;)
+	{
+		if (GetMessage(&msg, NULL, 0, 0) == -1) // -1 is an error, 0 means WM_QUIT.
+			continue;
+
+		switch (msg.message)
+		{
+		case AHK_HOOK:
+			problem_activating_hooks = false;
+			if (!g_KeybdHook)
+			{
+				if (!(g_KeybdHook = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeybdProc, g_hInstance, 0)))
+					problem_activating_hooks = true;
+			}
+			//PostThreadMessage(g_MainThreadID, AHK_HOOK, problem_activating_hooks, 0);
+			break;
+
+		case AHK_UNHOOK:
+			if (g_KeybdHook)
+				if (UnhookWindowsHookEx(g_KeybdHook))
+					g_KeybdHook = NULL;
+			break;
+
+		case AHK_SYNC:
+			sHookSyncd = true;
+			break;
+		}
+	}
+}
+
+void method1()
+{
+	if (RegisterHotKey(NULL, 1, MOD_ALT | MOD_NOREPEAT, B_KEY))
+	{
+		wprintf(L"Hotkey 'alt+b' registered, using MOD_NOREPEAT flag\n");
+	}
+
+	MSG msg;
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		if (msg.message == WM_HOTKEY)
+		{
+			x++;
+			wprintf(L"WM_HOTKEY received, %d\n", x);
+			Beep(523, 150);
+		}
+	}
+}
+
+void method2()
+{
+	g_hInstance = (HINSTANCE)GetModuleHandle(NULL);
+	g_MainThreadID = GetCurrentThreadId();
+
+	if (sThreadHandle = CreateThread(NULL, 8 * 1024, HookThreadProc, NULL, 0, &g_HookThreadID))
+		SetThreadPriority(sThreadHandle, THREAD_PRIORITY_TIME_CRITICAL);
+
+	for (int i = 0; i < 50 && !PostThreadMessage(g_HookThreadID, AHK_HOOK, 0, 0); ++i)
+		Sleep(10);
+
+	wprintf(L"Hotkey 'alt+b' hooked, no repeat\n");
+
+	while (true)
+	{
+		Sleep(100);
+	}
+}
 
 int main()
 {
-    if (RegisterHotKey(NULL, 1, MOD_ALT | MOD_NOREPEAT, B_KEY))
-    {
-        wprintf(L"Hotkey 'alt+b' registered, using MOD_NOREPEAT flag\n");
-    }
-
-    MSG msg;
-    int x = 0;
-    while (GetMessage(&msg, NULL, 0, 0))
-    {
-        if (msg.message == WM_HOTKEY)
-        {
-            x++;
-            wprintf(L"WM_HOTKEY received, %d\n", x);
-        }
-    }
-
+	//method1();
+	method2();
     return 0;
 }
 
